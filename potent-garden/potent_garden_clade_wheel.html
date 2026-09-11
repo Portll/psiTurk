@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Potent Garden &mdash; Cannabis Genetic Clade Wheel</title>
+<script src="d3.v7.min.js"></script>
+<script src="clade_wheel_data.js"></script>
+<style>
+  :root {
+    --bg: #0d0f0c;
+    --panel: #161a14;
+    --panel2: #1e241a;
+    --ink: #e9efe2;
+    --muted: #9fb08c;
+    --line: #2b3324;
+    --accent: #8fce5a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #app { display: grid; grid-template-columns: 1fr 340px; height: 100vh; }
+  #stage { position: relative; overflow: hidden; }
+  svg { display: block; width: 100%; height: 100%; cursor: grab; }
+  svg:active { cursor: grabbing; }
+
+  /* ---- header overlay ---- */
+  #title {
+    position: absolute; top: 18px; left: 22px; pointer-events: none;
+    text-shadow: 0 1px 8px #000;
+  }
+  #title h1 { margin: 0; font-size: 20px; letter-spacing: .5px; font-weight: 700; }
+  #title h1 span { color: var(--accent); }
+  #title p { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+
+  /* ---- controls ---- */
+  #controls {
+    position: absolute; top: 18px; right: 18px; display: flex; gap: 6px;
+    align-items: center; background: rgba(22,26,20,.82); border: 1px solid var(--line);
+    border-radius: 10px; padding: 6px; backdrop-filter: blur(4px);
+  }
+  #controls button {
+    background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 7px; width: 34px; height: 34px; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #controls button:hover { border-color: var(--accent); color: var(--accent); }
+  #controls button.wide { width: auto; padding: 0 12px; font-size: 12px; }
+  #search {
+    background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 7px; height: 34px; padding: 0 10px; font-size: 13px; width: 170px;
+  }
+  #search::placeholder { color: var(--muted); }
+
+  /* ---- breadcrumb ---- */
+  #crumb {
+    position: absolute; bottom: 16px; left: 22px; font-size: 12px; color: var(--muted);
+    pointer-events: none; text-shadow: 0 1px 6px #000; max-width: 60%;
+  }
+  #crumb b { color: var(--ink); }
+
+  /* ---- side panel ---- */
+  #side { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 18px; }
+  #side h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 8px; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .card .nm { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
+  .card .pa { font-size: 12px; color: var(--muted); margin: 0 0 10px; font-style: italic; }
+  .card .de { font-size: 13px; line-height: 1.45; margin: 0 0 12px; }
+  .kv { font-size: 12px; margin: 6px 0; }
+  .kv .k { color: var(--muted); display: inline-block; min-width: 78px; }
+  .terp { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
+  .terp span {
+    background: #24301b; border: 1px solid #3a4a2a; border-radius: 20px;
+    padding: 2px 9px; font-size: 11px; color: #cfe0b6;
+  }
+  .terp span .rank { color: var(--accent); font-weight: 700; margin-right: 4px; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; color: #10140d; }
+
+  .legend { margin-bottom: 18px; }
+  .legend .row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 5px 0; cursor: default; }
+  .legend .row.clade { cursor: pointer; }
+  .legend .row.clade:hover { color: var(--accent); }
+  .sw { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 auto; }
+  .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .count { color: var(--muted); font-weight: 400; font-size: 11px; }
+
+  /* ---- tooltip ---- */
+  #tip {
+    position: fixed; pointer-events: none; z-index: 20; max-width: 300px;
+    background: rgba(16,20,13,.97); border: 1px solid var(--accent); border-radius: 9px;
+    padding: 10px 12px; font-size: 12px; line-height: 1.4; opacity: 0; transition: opacity .08s;
+    box-shadow: 0 8px 26px rgba(0,0,0,.6);
+  }
+  #tip .t-nm { font-weight: 700; font-size: 14px; }
+  #tip .t-path { color: var(--muted); font-size: 11px; margin: 2px 0 6px; }
+  #tip .t-row { margin: 3px 0; }
+  #tip .t-row .k { color: var(--muted); }
+
+  /* radial labels */
+  text.arc-label { font-size: 11px; fill: #10140d; pointer-events: none; user-select: none; }
+  text.arc-label.light { fill: #e9efe2; }
+  text.strain-label { font-size: 3.6px; fill: #dfe8d1; pointer-events: none; user-select: none; }
+  #centerLabel { font-weight: 700; fill: var(--ink); text-anchor: middle; pointer-events: none; }
+  #centerSub { fill: var(--muted); text-anchor: middle; pointer-events: none; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <div id="title">
+      <h1>Potent&nbsp;<span>Garden</span></h1>
+      <p>Cannabis genetic clade wheel &middot; 4 rings &middot; <span id="nStrains">&mdash;</span> strains</p>
+    </div>
+    <div id="controls">
+      <input id="search" type="text" placeholder="Search strain / terpene&hellip;" autocomplete="off"/>
+      <button id="zoomIn" title="Zoom in">+</button>
+      <button id="zoomOut" title="Zoom out">&minus;</button>
+      <button id="reset" class="wide" title="Reset view">Reset</button>
+      <button id="colorToggle" class="wide" title="Toggle leaf colouring">Colour: Chemotype</button>
+    </div>
+    <div id="crumb"></div>
+    <svg id="wheel"></svg>
+  </div>
+
+  <div id="side">
+    <h2>Selection</h2>
+    <div id="detail" class="card">
+      <div class="de">Hover a segment for a quick read; click any ring to zoom to it. Outer ring = individual strains, coloured by chemotype.</div>
+    </div>
+
+    <div class="legend">
+      <h2>Chemotype (outer ring)</h2>
+      <div id="chemoLegend"></div>
+    </div>
+
+    <div class="legend">
+      <h2>Clades (inner rings) <span class="count" id="cladeCount"></span></h2>
+      <div id="cladeLegend"></div>
+    </div>
+
+    <div class="hint">
+      <b>Navigation</b><br/>
+      &bull; Scroll / pinch to zoom, drag to pan.<br/>
+      &bull; Click a clade, sub-family or group to zoom to it.<br/>
+      &bull; Click the centre to reset.<br/>
+      &bull; Search highlights matches and jumps to the first hit.<br/>
+      &bull; Strain names appear as you zoom in (tuned for 4K displays).
+    </div>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+"use strict";
+const DATA = window.POTENT_GARDEN_DATA;
+const META = DATA.meta;
+document.getElementById("nStrains").textContent = META.strain_count;
+
+// ---- clade palette (inner rings coloured by genetic lineage) --------------
+const CLADE_COLORS = {
+  "Equatorial Sativa Landraces": "#d9b23a",
+  "Asian Indica Landraces":      "#8a5a2b",
+  "Haze Lineage":                "#5db3d9",
+  "Skunk Lineage":               "#7bc043",
+  "Kush / OG Lineage":           "#e0762f",
+  "Diesel / Chem Lineage":       "#c7423a",
+  "Cookies / Dessert Lineage":   "#b060c0",
+  "Purple / Grape & Berry Indica": "#7a5cc8",
+  "Specialty Cannabinoid & Balanced": "#3fae86"
+};
+const CHEMO = META.chemotypes; // {label: color}
+
+// ---- layout ---------------------------------------------------------------
+const stage = document.getElementById("stage");
+const svg = d3.select("#wheel");
+let W = stage.clientWidth, H = stage.clientHeight;
+const radius = () => Math.min(W, H) / 2 - 8;
+
+// depth radius bands: 0 root(center) 1 clade 2 subfamily 3 group 4 strain
+function bands(R) {
+  const r0 = R * 0.10;                 // center hub
+  const ring = (R - r0) / 4;
+  return [r0, r0 + ring*1.0, r0 + ring*1.9, r0 + ring*2.7, R]; // inner radii per depth boundary
+}
+
+const root = d3.hierarchy(DATA.tree)
+  .sum(d => d.value || 0)
+  .sort((a, b) => (b.value || 0) - (a.value || 0) || d3.ascending(a.data.name, b.data.name));
+
+d3.partition().size([2 * Math.PI, 1])(root);
+
+let colorMode = "chemotype"; // or "clade"
+
+function cladeOf(d) {
+  let n = d; while (n.depth > 1) n = n.parent; return n.data.name;
+}
+function baseColor(d) {
+  if (d.depth === 0) return "#10140d";
+  const c = d3.hsl(CLADE_COLORS[cladeOf(d)] || "#888");
+  // lighten inner rings progressively so structure reads
+  c.l = Math.min(0.82, c.l + (d.depth - 1) * 0.06);
+  c.s = Math.max(0.25, c.s - (d.depth - 1) * 0.05);
+  return c.toString();
+}
+function fillColor(d) {
+  if (d.depth === 4 && colorMode === "chemotype") {
+    return d.data.color || "#888";
+  }
+  return baseColor(d);
+}
+
+// group container for zoom/pan
+const gZoom = svg.append("g");
+const g = gZoom.append("g");           // rotated/positioned wheel
+const arcsG = g.append("g");
+const labelsG = g.append("g");
+const centerG = g.append("g");
+
+let arcGen, B;
+function computeGeom() {
+  W = stage.clientWidth; H = stage.clientHeight;
+  svg.attr("viewBox", [0, 0, W, H]);
+  const R = radius();
+  B = bands(R);
+  gZoom.attr("transform", null);
+  g.attr("transform", `translate(${W/2},${H/2})`);
+  arcGen = d3.arc()
+    .startAngle(d => d.x0)
+    .endAngle(d => d.x1)
+    .padAngle(d => Math.min((d.x1 - d.x0) / 2, 0.0016))
+    .padRadius(R)
+    .innerRadius(d => B[d.depth - 1])
+    .outerRadius(d => B[d.depth] - (d.depth === 4 ? 0.5 : 1.2));
+}
+computeGeom();
+
+const nodes = root.descendants().filter(d => d.depth > 0);
+
+// ---- arcs -----------------------------------------------------------------
+const path = arcsG.selectAll("path")
+  .data(nodes)
+  .join("path")
+    .attr("fill", fillColor)
+    .attr("stroke", "#0d0f0c")
+    .attr("stroke-width", 0.5)
+    .attr("d", arcGen)
+    .style("cursor", "pointer")
+    .on("mousemove", onHover)
+    .on("mouseleave", hideTip)
+    .on("click", (ev, d) => { ev.stopPropagation(); zoomTo(d); });
+
+path.append("title").text(d =>
+  d.ancestors().reverse().slice(1).map(n => n.data.name).join(" › "));
+
+// ---- ring labels (clade / subfamily / group) -----------------------------
+function labelTransform(d) {
+  const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+  const r = (B[d.depth - 1] + B[d.depth]) / 2;
+  const rot = x - 90;
+  const flip = x >= 180 ? 180 : 0;
+  return `rotate(${rot}) translate(${r},0) rotate(${flip})`;
+}
+function arcAngle(d) { return d.x1 - d.x0; }
+
+const ringLabels = labelsG.selectAll("text.arc-label")
+  .data(nodes.filter(d => d.depth >= 1 && d.depth <= 3))
+  .join("text")
+    .attr("class", "arc-label")
+    .attr("dy", "0.32em")
+    .attr("text-anchor", d => {
+      const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      return x < 180 ? "start" : "end";
+    })
+    .attr("transform", labelTransform)
+    .style("font-size", d => d.depth === 1 ? "13px" : (d.depth === 2 ? "10px" : "8px"))
+    .style("font-weight", d => d.depth === 1 ? 700 : 400)
+    .text(d => d.data.name)
+    .style("display", d => arcAngle(d) > (d.depth === 1 ? 0.04 : 0.055) ? null : "none");
+
+// darken/lighten label text depending on arc fill luminance
+ringLabels.each(function(d) {
+  const c = d3.hsl(baseColor(d));
+  d3.select(this).classed("light", c.l < 0.55);
+});
+
+// ---- strain labels (outer ring) — shown when zoomed in --------------------
+const strainNodes = nodes.filter(d => d.depth === 4);
+const strainLabels = labelsG.selectAll("text.strain-label")
+  .data(strainNodes)
+  .join("text")
+    .attr("class", "strain-label")
+    .attr("dy", "0.32em")
+    .attr("text-anchor", d => {
+      const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      return x < 180 ? "start" : "end";
+    })
+    .attr("transform", d => {
+      const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      const r = B[4] + 2;
+      const rot = x - 90;
+      const flip = x >= 180 ? 180 : 0;
+      return `rotate(${rot}) translate(${r},0) rotate(${flip})`;
+    })
+    .text(d => d.data.name)
+    .style("opacity", 0);
+
+// ---- center hub -----------------------------------------------------------
+centerG.append("circle")
+  .attr("r", B[0] - 2).attr("fill", "#10140d").attr("stroke", "#2b3324")
+  .style("cursor", "pointer")
+  .on("click", () => resetZoom());
+const centerLabel = centerG.append("text").attr("id", "centerLabel").attr("dy", "-0.1em")
+  .style("font-size", "15px").text("Cannabis");
+const centerSub = centerG.append("text").attr("id", "centerSub").attr("dy", "1.3em")
+  .text(META.strain_count + " strains");
+
+// ==========================================================================
+// ZOOM / PAN
+// ==========================================================================
+const zoom = d3.zoom().scaleExtent([0.6, 60])
+  .on("zoom", (ev) => {
+    gZoom.attr("transform", ev.transform);
+    updateStrainLabels(ev.transform.k);
+  });
+svg.call(zoom).on("dblclick.zoom", null);
+
+function updateStrainLabels(k) {
+  // show a strain label when its arc is large enough on screen
+  const R = radius();
+  strainLabels.style("opacity", d => {
+    const arcPx = arcAngle(d) * (B[4]) * k;   // approx tangential px at outer ring
+    return arcPx > 7 ? Math.min(1, (arcPx - 7) / 6) : 0;
+  }).style("font-size", (12 / Math.max(k, 1)).toFixed(2) + "px");
+}
+
+function zoomToBox(cx, cy, r, dur = 750) {
+  // translate so (cx,cy) in wheel coords maps to viewport center, scaled to fit r
+  const scale = Math.max(0.6, Math.min(60, (Math.min(W, H) * 0.42) / r));
+  const tx = W/2 - (W/2 + cx) * scale;
+  const ty = H/2 - (H/2 + cy) * scale;
+  svg.transition().duration(dur)
+    .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}
+
+function zoomTo(d) {
+  // bounding radius of the clicked segment (its own extent + descendants)
+  const outer = B[Math.min(4, d.height ? d.depth + d.height : d.depth)];
+  const angC = (d.x0 + d.x1) / 2;
+  const rMid = (B[d.depth - 1] + outer) / 2;
+  const cx = Math.cos(angC - Math.PI/2) * rMid;
+  const cy = Math.sin(angC - Math.PI/2) * rMid;
+  const span = Math.max((d.x1 - d.x0) * outer, outer - B[d.depth - 1]) / 2 + 30;
+  zoomToBox(cx, cy, Math.max(span, 60));
+  select(d);
+}
+
+function resetZoom() {
+  svg.transition().duration(650).call(zoom.transform, d3.zoomIdentity);
+  clearHighlight();
+  showDetail(null);
+  crumb(null);
+}
+document.getElementById("reset").onclick = resetZoom;
+document.getElementById("zoomIn").onclick = () => svg.transition().duration(250).call(zoom.scaleBy, 1.5);
+document.getElementById("zoomOut").onclick = () => svg.transition().duration(250).call(zoom.scaleBy, 1/1.5);
+
+// ==========================================================================
+// SELECTION / DETAIL / TOOLTIP
+// ==========================================================================
+const tip = document.getElementById("tip");
+function onHover(ev, d) {
+  const p = d.ancestors().reverse().slice(1).map(n => n.data.name);
+  let html = `<div class="t-nm">${d.data.name}</div>`;
+  html += `<div class="t-path">${p.slice(0, -1).join(" › ") || "clade"}</div>`;
+  if (d.data.type === "strain") {
+    html += `<div class="t-row"><span class="k">Parents:</span> ${esc(d.data.parents)}</div>`;
+    html += `<div class="t-row"><span class="k">Terpenes:</span> ${d.data.terpenes.join(", ")}</div>`;
+    html += `<div class="t-row"><span class="k">Chemotype:</span> ${d.data.chemotype}</div>`;
+    html += `<div class="t-row"><span class="k">Cannabinoids:</span> ${esc(d.data.cannabinoids)}</div>`;
+  } else {
+    const leaves = d.leaves().length;
+    html += `<div class="t-row">${leaves} strain${leaves>1?"s":""} in this ${d.depth===1?"clade":(d.depth===2?"sub-family":"group")}</div>`;
+  }
+  tip.innerHTML = html;
+  tip.style.opacity = 1;
+  const pad = 14;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + 310 > window.innerWidth) x = ev.clientX - 310;
+  if (y + tip.offsetHeight > window.innerHeight) y = window.innerHeight - tip.offsetHeight - 8;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+function hideTip() { tip.style.opacity = 0; }
+
+function select(d) {
+  showDetail(d);
+  crumb(d);
+  // highlight the branch
+  const set = new Set(d.ancestors());
+  path.attr("opacity", n => set.has(n) || n.ancestors().includes(d) ? 1 : 0.28);
+}
+function clearHighlight() { path.attr("opacity", 1); }
+
+function showDetail(d) {
+  const box = document.getElementById("detail");
+  if (!d) { box.innerHTML = '<div class="de">Hover a segment for a quick read; click any ring to zoom to it. Outer ring = individual strains, coloured by chemotype.</div>'; return; }
+  if (d.data.type === "strain") {
+    const chemoColor = CHEMO[d.data.chemotype] || "#888";
+    const terps = d.data.terpenes.map((t,i) => `<span><span class="rank">${i+1}</span>${t}</span>`).join("");
+    box.innerHTML =
+      `<div class="nm">${d.data.name}</div>` +
+      `<div class="pa">${esc(d.data.parents)}</div>` +
+      `<div class="de">${esc(d.data.description)}</div>` +
+      `<div class="kv"><span class="k">Clade</span> ${cladeOf(d)}</div>` +
+      `<div class="kv"><span class="k">Lineage</span> ${d.ancestors().reverse().slice(1,-1).map(n=>n.data.name).join(" › ")}</div>` +
+      `<div class="kv"><span class="k">Chemotype</span> <span class="chip" style="background:${chemoColor}">${d.data.chemotype}</span></div>` +
+      `<div class="kv"><span class="k">Cannabinoids</span> ${esc(d.data.cannabinoids)}</div>` +
+      `<div class="kv"><span class="k">Terpenes</span><div class="terp">${terps}</div></div>`;
+  } else {
+    const leaves = d.leaves();
+    const chemos = d3.rollup(leaves, v => v.length, l => l.data.chemotype);
+    let chemoRows = Array.from(chemos, ([k,v]) => `<div class="kv"><span class="chip" style="background:${CHEMO[k]||'#888'}">${v}</span> ${k}</div>`).join("");
+    box.innerHTML =
+      `<div class="nm">${d.data.name}</div>` +
+      `<div class="pa">${d.depth===1?"clade":(d.depth===2?"sub-family":"group")} &middot; ${leaves.length} strains</div>` +
+      `<div class="kv"><span class="k">Path</span> ${d.ancestors().reverse().slice(1).map(n=>n.data.name).join(" › ")}</div>` +
+      chemoRows;
+  }
+}
+
+function crumb(d) {
+  const el = document.getElementById("crumb");
+  if (!d) { el.innerHTML = ""; return; }
+  el.innerHTML = d.ancestors().reverse().map((n,i,a) =>
+    i === a.length-1 ? `<b>${n.data.name}</b>` : n.data.name).join(" &nbsp;›&nbsp; ");
+}
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// ==========================================================================
+// LEGENDS
+// ==========================================================================
+const chemoLegend = document.getElementById("chemoLegend");
+Object.entries(CHEMO).forEach(([label, color]) => {
+  const div = document.createElement("div");
+  div.className = "row";
+  div.innerHTML = `<span class="sw" style="background:${color}"></span>${label}`;
+  chemoLegend.appendChild(div);
+});
+
+const cladeLegend = document.getElementById("cladeLegend");
+const cladeCounts = d3.rollup(strainNodes, v => v.length, d => cladeOf(d));
+document.getElementById("cladeCount").textContent = `(${root.children.length})`;
+root.children.forEach(c => {
+  const name = c.data.name;
+  const div = document.createElement("div");
+  div.className = "row clade";
+  div.innerHTML = `<span class="sw" style="background:${CLADE_COLORS[name]||'#888'}"></span>${name} <span class="count">&nbsp;${cladeCounts.get(name)||0}</span>`;
+  div.onclick = () => zoomTo(c);
+  cladeLegend.appendChild(div);
+});
+
+// ==========================================================================
+// COLOUR TOGGLE
+// ==========================================================================
+document.getElementById("colorToggle").onclick = function() {
+  colorMode = colorMode === "chemotype" ? "clade" : "chemotype";
+  this.textContent = "Colour: " + (colorMode === "chemotype" ? "Chemotype" : "Clade");
+  path.transition().duration(400).attr("fill", fillColor);
+};
+
+// ==========================================================================
+// SEARCH
+// ==========================================================================
+const searchEl = document.getElementById("search");
+searchEl.addEventListener("input", () => {
+  const q = searchEl.value.trim().toLowerCase();
+  if (!q) { clearHighlight(); return; }
+  let first = null;
+  path.attr("opacity", d => {
+    if (d.data.type !== "strain") return 0.15;
+    const hit = d.data.name.toLowerCase().includes(q) ||
+                (d.data.terpenes||[]).some(t => t.toLowerCase().includes(q)) ||
+                (d.data.parents||"").toLowerCase().includes(q);
+    if (hit && !first) first = d;
+    return hit ? 1 : 0.12;
+  });
+  if (first) { showDetail(first); crumb(first); }
+});
+searchEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    const q = searchEl.value.trim().toLowerCase();
+    const hit = strainNodes.find(d => d.data.name.toLowerCase().includes(q));
+    if (hit) zoomTo(hit);
+  }
+});
+
+// ==========================================================================
+// RESIZE
+// ==========================================================================
+let rt;
+window.addEventListener("resize", () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => {
+    computeGeom();
+    path.attr("d", arcGen);
+    ringLabels.attr("transform", labelTransform);
+    strainLabels.attr("transform", d => {
+      const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      const rot = x - 90, flip = x >= 180 ? 180 : 0;
+      return `rotate(${rot}) translate(${B[4]+2},0) rotate(${flip})`;
+    });
+    centerG.select("circle").attr("r", B[0] - 2);
+  }, 120);
+});
+
+updateStrainLabels(1);
+</script>
+</body>
+</html>
